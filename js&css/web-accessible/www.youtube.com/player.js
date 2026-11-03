@@ -1385,11 +1385,83 @@ var xpath = function (xpathToExecute) {
 // the darkening as its own box-shadow keeps it correctly stacked
 // automatically, with no z-index/stacking-context guesswork involved. #4353
 ImprovedTube.cinemaModeSetVisible = function (visible) {
-	var ytdPlayer = document.getElementById('ytd-player');
-	if (!ytdPlayer) return false;
-	ytdPlayer.style.boxShadow = visible ? '0 0 0 9999px rgba(0, 0, 0, 1)' : '';
+	var state = ImprovedTube.cinemaModeState || (ImprovedTube.cinemaModeState = {});
+	var spotlight = document.getElementById('it-cinema-mode-spotlight');
+
+	// Created once, so add/removeEventListener get the same function reference.
+	if (!state.sync) {
+		state.sync = function () {
+			var spot = document.getElementById('it-cinema-mode-spotlight');
+			if (!spot) return;
+
+			// #ytd-player can be 0px tall while the video overflows it,
+			// so fall back to measuring the video itself.
+			var el = document.getElementById('ytd-player');
+			var rect = el && el.getBoundingClientRect();
+			if (!rect || !rect.width || !rect.height) {
+				el = document.querySelector('#movie_player video');
+				rect = el && el.getBoundingClientRect();
+			}
+
+			// No measurable player, or fullscreen (browser top layer): nothing to darken.
+			if (!rect || !rect.width || !rect.height || document.fullscreenElement) {
+				spot.style.display = 'none';
+				return;
+			}
+			spot.style.display = '';
+			spot.style.top = rect.top + 'px';
+			spot.style.left = rect.left + 'px';
+			spot.style.width = rect.width + 'px';
+			spot.style.height = rect.height + 'px';
+		};
+
+		// Leaving the watch page must never leave the page stuck dark.
+		state.onNavigate = function () {
+			if (location.pathname !== '/watch') {
+				ImprovedTube.cinemaModeActive = false;
+				ImprovedTube.cinemaModeSetVisible(false);
+			}
+		};
+	}
+
+	// Always clear previous listeners first, so repeated calls never stack duplicates.
+	window.removeEventListener('resize', state.sync, true);
+	window.removeEventListener('scroll', state.sync, true);
+	document.removeEventListener('fullscreenchange', state.sync, true);
+	document.removeEventListener('yt-navigate-finish', state.onNavigate, true);
+	if (state.observer) state.observer.disconnect();
+
+	if (!visible) {
+		if (spotlight) spotlight.remove();
+		return true;
+	}
+
+	if (!spotlight) {
+		spotlight = document.createElement('div');
+		spotlight.id = 'it-cinema-mode-spotlight';
+		spotlight.style.cssText = 'position:fixed;pointer-events:none;z-index:2000000;' +
+			'box-shadow:0 0 0 9999px rgba(0,0,0,1);';
+		document.documentElement.appendChild(spotlight);
+	}
+
+	window.addEventListener('resize', state.sync, true);
+	window.addEventListener('scroll', state.sync, true);
+	document.addEventListener('fullscreenchange', state.sync, true);
+	document.addEventListener('yt-navigate-finish', state.onNavigate, true);
+
+	// Follows theater mode, sidebar changes, and a player that isn't laid out yet
+	// when auto cinema mode fires.
+	if (window.ResizeObserver) {
+		state.observer = state.observer || new ResizeObserver(state.sync);
+		['#ytd-player', '#movie_player video'].forEach(function (selector) {
+			var target = document.querySelector(selector);
+			if (target) state.observer.observe(target);
+		});
+	}
+
+	state.sync();
 	return true;
-}
+};
 
 ImprovedTube.playerCinemaModeButton = function () {
 	if (this.storage.player_cinema_mode_button && (/watch\?/.test(location.href))) {
